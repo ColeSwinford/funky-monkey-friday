@@ -1,0 +1,7 @@
+{
+    "Token": "",
+    "GifDirectory": "FunkyMonkeyGifs",
+    "ConfigFile": "config.json",
+    "UsersFile": "users.json",
+    "LogRetentionDays": 7
+}
