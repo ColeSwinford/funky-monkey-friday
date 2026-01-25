@@ -44,12 +44,22 @@ Add it to your server here! https://discord.com/oauth2/authorize?client_id=92771
 
 ## Deploy
 
-Execute this script on your server. It will download the latest code and start the bot.
+Execute this script to perform a first install or in place upgrade and start the container.
 
 *Replace `YOUR_TOKEN` with your actual Discord Bot Token.*
+
 ```bash
-git clone [https://github.com/ColeSwinford/Python--Funky-Monkey-Friday-Bot.git](https://github.com/ColeSwinford/Python--Funky-Monkey-Friday-Bot.git) FunkyMonkeyFriday 2>/dev/null || (cd FunkyMonkeyFriday && git pull); cd FunkyMonkeyFriday; DISCORD_TOKEN=YOUR_TOKEN docker compose up -d --build
+# 1. Clone source repo regardless if it exists already or not
+git clone https://github.com/ColeSwinford/Python--Funky-Monkey-Friday-Bot.git FunkyMonkeyFriday 2>/dev/null || true
+
+# 2. Enter folder, Force-Sync code (Fixes conflicts), and Start
+cd FunkyMonkeyFriday && \
+git fetch --all && \
+git reset --hard origin/main && \
+docker rm -f funky_monkey_friday 2>/dev/null || true && \
+DISCORD_TOKEN=YOUR_TOKEN docker compose up -d --build
 ```
+**Note:** this will take some time, especially on a pi, as resources like ffmpeg are huge
 
 ## Privacy & Legal
 - **Data Storage:** This bot stores server configurations (timezones) and user economy balances locally in JSON files.
