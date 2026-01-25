@@ -1,23 +1,25 @@
 import discord
 from discord.ext import commands, tasks
 import os
-import secrets  # For better randomization
+import secrets
 import datetime
 import json
 import pytz
 import asyncio
 import sys
 import logging
+import shutil
 from logging.handlers import TimedRotatingFileHandler
 
 # --- Initialization & Configuration ---
 
-# Load settings
 try:
     with open("appsettings.json", "r") as f:
         settings = json.load(f)
         TOKEN = settings["Token"]
         GIF_DIR = settings["GifDirectory"]
+        # Directory for voice alert audio files
+        SOUND_DIR = settings.get("SoundDirectory", "./sounds") 
         CONFIG_FILE = settings["ConfigFile"]
         USERS_FILE = settings["UsersFile"]
         LOG_RETENTION_DAYS = settings.get("LogRetentionDays", 7)
@@ -28,14 +30,18 @@ except KeyError as e:
     print(f"CRITICAL: Missing setting {e} in 'appsettings.json'. Terminating.")
     sys.exit(1)
 
-# --- Logging Setup (Minimalist) ---
+# --- Dependency Check ---
+if not shutil.which("ffmpeg"):
+    print("CRITICAL: FFmpeg not found. Voice features will fail. Install FFmpeg to path.")
+    # Execution continues; voice commands will raise errors if invoked
+
+# --- Logging Setup ---
 if not os.path.exists("logs"):
     os.makedirs("logs")
 
 logger = logging.getLogger("FunkyMonkey")
 logger.setLevel(logging.INFO)
 
-# Handler: Rotate logs at midnight, keep last X days
 handler = TimedRotatingFileHandler(
     filename="logs/bot.log",
     when="midnight",
@@ -47,12 +53,11 @@ formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 
-# Console Handler (only for startup/errors)
 console_handler = logging.StreamHandler()
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
-# --- File Integrity Checks ---
+# --- File Integrity ---
 def ensure_file_exists(filepath, default_content):
     if not os.path.exists(filepath):
         logger.info(f"Creating missing file: {filepath}")
@@ -68,9 +73,11 @@ user_balances = {}
 sent_cache = set()    
 users_dirty = False   
 
-# Initialize Bot
+# --- Bot Initialization ---
 intents = discord.Intents.default()
 intents.message_content = True
+# Enable voice intent to detect user presence in channels
+intents.voice_states = True 
 bot = commands.Bot(command_prefix='!', intents=intents)
 bot.remove_command('help') 
 
@@ -80,14 +87,12 @@ def load_data():
     """Loads JSON data into RAM."""
     global bot_config, user_balances
     
-    # Load Config
     with open(CONFIG_FILE, 'r') as f:
         try: bot_config = json.load(f)
         except json.JSONDecodeError: 
             logger.error("Config file corrupted. Resetting.")
             bot_config = {}
     
-    # Load Users
     with open(USERS_FILE, 'r') as f:
         try: user_balances = json.load(f)
         except json.JSONDecodeError: 
@@ -105,17 +110,25 @@ def save_users():
         json.dump(user_balances, f, indent=4)
 
 def get_random_monkey_path():
+    """Gets a random GIF from the configured directory."""
     try:
-        if not os.path.exists(GIF_DIR):
-            logger.warning(f"GIF Directory {GIF_DIR} not found.")
-            return None
-        files = os.listdir(GIF_DIR)
-        if not files: 
-            return None
-        # secrets.choice is cryptographically secure
+        if not os.path.exists(GIF_DIR): return None
+        files = [f for f in os.listdir(GIF_DIR) if os.path.isfile(os.path.join(GIF_DIR, f))]
+        if not files: return None
         return os.path.join(GIF_DIR, secrets.choice(files))
     except Exception as e:
         logger.error(f"Error reading GIF directory: {e}")
+        return None
+
+def get_random_sound_path():
+    """Gets a random MP3/WAV from the configured directory."""
+    try:
+        if not os.path.exists(SOUND_DIR): return None
+        files = [f for f in os.listdir(SOUND_DIR) if f.endswith(('.mp3', '.wav'))]
+        if not files: return None
+        return os.path.join(SOUND_DIR, secrets.choice(files))
+    except Exception as e:
+        logger.error(f"Error reading Sound directory: {e}")
         return None
 
 # --- Events ---
@@ -129,6 +142,10 @@ async def on_ready():
         check_monkey_time.start()
     if not autosave_users.is_running():
         autosave_users.start()
+    
+    # Start voice activity task
+    if not random_monkey_noises.is_running():
+        random_monkey_noises.start()
         
     await bot.change_presence(activity=discord.Game(name='playing around'))
 
@@ -136,10 +153,15 @@ async def on_ready():
 
 @tasks.loop(seconds=60)
 async def check_monkey_time():
+    """Friday Text Alert Logic"""
     utc_now = datetime.datetime.now(datetime.timezone.utc)
     
     for guild_id_str, settings in bot_config.items():
         try:
+            # Check if text config exists
+            if 'timezone' not in settings or 'hour' not in settings:
+                continue
+
             target_tz = pytz.timezone(settings['timezone'])
             local_time = utc_now.astimezone(target_tz)
 
@@ -169,9 +191,60 @@ async def check_monkey_time():
         except Exception as e:
             logger.error(f"Error processing guild {guild_id_str}: {e}")
 
+@tasks.loop(hours=1)
+async def random_monkey_noises():
+    """Voice Channel Ambush Logic (5% chance per hour)"""
+    for guild_id_str, settings in bot_config.items():
+        try:
+            # 1. Check if voice is configured
+            vc_id = settings.get("voice_channel_id")
+            mode = settings.get("voice_mode", "off") # off, always, friday
+            
+            if not vc_id or mode == "off":
+                continue
+
+            # 2. Check "Friday Only" constraint
+            if mode == "friday":
+                # Uses the text timezone if set, else UTC
+                tz_str = settings.get("timezone", "UTC")
+                local_now = datetime.datetime.now(pytz.timezone(tz_str))
+                if local_now.weekday() != 4: # 4 is Friday
+                    continue
+
+            # 3. Random Chance Execution (5%)
+            # secrets.randbelow(100) returns 0-99
+            if secrets.randbelow(100) < 5:
+                voice_channel = bot.get_channel(vc_id)
+                sound_file = get_random_sound_path()
+                
+                if voice_channel and sound_file:
+                    logger.info(f"🎲 Ambush triggered for {guild_id_str}")
+                    
+                    # Connect
+                    try:
+                        vc = await voice_channel.connect()
+                    except discord.ClientException:
+                        logger.warning(f"Already in voice for {guild_id_str}, skipping.")
+                        continue
+                    except Exception as e:
+                        logger.error(f"Voice connection failed: {e}")
+                        continue
+
+                    # Play Audio
+                    try:
+                        vc.play(discord.FFmpegPCMAudio(sound_file))
+                        while vc.is_playing():
+                            await asyncio.sleep(1)
+                    except Exception as e:
+                        logger.error(f"Audio playback failed: {e}")
+                    finally:
+                        await vc.disconnect()
+        
+        except Exception as e:
+            logger.error(f"Error in monkey noises task for {guild_id_str}: {e}")
+
 @tasks.loop(minutes=5)
 async def autosave_users():
-    """Saves user data every 5 minutes if changed."""
     global users_dirty
     if users_dirty:
         save_users()
@@ -179,6 +252,7 @@ async def autosave_users():
 
 @check_monkey_time.before_loop
 @autosave_users.before_loop
+@random_monkey_noises.before_loop
 async def before_tasks():
     await bot.wait_until_ready()
 
@@ -188,23 +262,22 @@ async def before_tasks():
 async def help(ctx):
     embed = discord.Embed(
         title="🍌 Funky Monkey Assistance",
-        description="You're in the ape zone; here we serve monkeys and (banana) gambling.",
+        description="You're in the ape zone.",
         color=0xFFD700 
     )
     
     embed.add_field(
-        name="🎲 **Banana Economy**", 
-        value="`!daily` - Claim your free daily bananas\n`!balance` - Check your stash\n`!gamble <amount>` - Double or nothing!", 
+        name="🎲 **Economy**", 
+        value="`!daily` - Free bananas\n`!balance` - Check stash\n`!gamble <amt>` - Double or nothing", 
         inline=False
     )
     
     embed.add_field(
-        name="⚙️ **Configuration (Admins Only)**", 
-        value="`!config` - Setup Friday alerts & Timezone\n`!test` - Test the alert immediately", 
+        name="⚙️ **Config (Admin)**", 
+        value="`!config` - Setup Text Alerts\n`!voicecfg` - Setup Voice Ambush\n`!test` - Test Text\n`!testvoice` - Test Voice", 
         inline=False
     )
     
-    embed.set_footer(text="Commands timeout after 60 seconds")
     await ctx.send(embed=embed)
 
 # --- Economy Commands ---
@@ -252,15 +325,12 @@ async def gamble(ctx, amount: str):
             return
 
     if bet <= 0:
-        await ctx.send("You can't bet nothing, you coward.")
+        await ctx.send("You can't bet nothing.")
         return
     if bet > current_bal:
         await ctx.send(f"🚫 You only have **{current_bal}** bananas!")
         return
 
-    # Use secrets for cryptographically strong random numbers
-    # randbelow(100) returns 0 to 99. 
-    # 0-49 = Win (50%), 50-99 = Loss (50%)
     roll = secrets.randbelow(100)
     
     if roll < 50:
@@ -288,8 +358,80 @@ async def test(ctx):
 
 @bot.command()
 @commands.has_permissions(administrator=True)
-async def config(ctx):
+async def testvoice(ctx):
+    """Manually triggers the voice sound in the user's channel."""
+    if not ctx.author.voice:
+        await ctx.send("You must be in a voice channel to test this.")
+        return
+
+    sound_file = get_random_sound_path()
+    if not sound_file:
+        await ctx.send("Error: No sound files found in directory.")
+        return
+
+    vc = await ctx.author.voice.channel.connect()
+    try:
+        vc.play(discord.FFmpegPCMAudio(sound_file))
+        while vc.is_playing():
+            await asyncio.sleep(1)
+    finally:
+        await vc.disconnect()
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def voicecfg(ctx):
+    """Sets up the voice ambush feature."""
     def check(m): return m.author == ctx.author and m.channel == ctx.channel
+
+    guild_id = str(ctx.guild.id)
+    
+    # Initialize config if not exists
+    if guild_id not in bot_config:
+        bot_config[guild_id] = {}
+
+    try:
+        # 1. Get Channel ID
+        await ctx.send("🔊 **Voice Setup**\nPaste the **Voice Channel ID** to haunt (or type 'cancel'):")
+        msg_id = await bot.wait_for('message', check=check, timeout=60)
+        if msg_id.content.lower() == 'cancel': return
+        
+        try:
+            vc_id = int(msg_id.content)
+            # Verify channel exists
+            if not bot.get_channel(vc_id):
+                await ctx.send("❌ Channel not found.")
+                return
+        except ValueError:
+            await ctx.send("❌ Invalid ID.")
+            return
+
+        # 2. Get Mode
+        await ctx.send("🗓️ **Select Mode**:\nType `friday`, `always`, or `off`:")
+        msg_mode = await bot.wait_for('message', check=check, timeout=60)
+        mode = msg_mode.content.lower()
+        if mode not in ['friday', 'always', 'off']:
+            await ctx.send("❌ Invalid mode.")
+            return
+
+        # 3. Save
+        bot_config[guild_id]["voice_channel_id"] = vc_id
+        bot_config[guild_id]["voice_mode"] = mode
+        save_config()
+        
+        await ctx.send(f"✅ **Saved!**\nTarget: <#{vc_id}>\nMode: `{mode}`\nChance: 5% per hour.")
+
+    except asyncio.TimeoutError:
+        await ctx.send("❌ Timed out.")
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def config(ctx):
+    """Configures the scheduled text alerts."""
+    def check(m): return m.author == ctx.author and m.channel == ctx.channel
+
+    guild_id = str(ctx.guild.id)
+    if guild_id not in bot_config:
+        bot_config[guild_id] = {}
 
     try:
         await ctx.send('Enter alert hour (0-23):')
@@ -300,35 +442,29 @@ async def config(ctx):
         msg_m = await bot.wait_for('message', check=check, timeout=60)
         minute = int(msg_m.content)
 
-        while True:
-            await ctx.send('Enter timezone (e.g. US/Eastern) or type **help**:')
-            msg_tz = await bot.wait_for('message', check=check, timeout=60)
-            if msg_tz.content.lower() == 'help':
-                await ctx.send("Enter country code (e.g. US, GB):")
-                cc = (await bot.wait_for('message', check=check, timeout=60)).content.upper()
-                if cc in pytz.country_timezones:
-                    await ctx.send(f"Timezones:\n`" + "\n".join(pytz.country_timezones[cc]) + "`")
-            else:
-                pytz.timezone(msg_tz.content)
-                bot_config[str(ctx.guild.id)] = {
-                    "channel_id": ctx.channel.id, "hour": hour, "minute": minute, "timezone": msg_tz.content
-                }
-                save_config()
-                await ctx.send("✅ Configuration saved.")
-                break
+        await ctx.send('Enter timezone (e.g. US/Eastern):')
+        msg_tz = await bot.wait_for('message', check=check, timeout=60)
+        pytz.timezone(msg_tz.content) # Validate
+
+        # Update specific keys instead of overwriting the whole dict
+        bot_config[guild_id]["channel_id"] = ctx.channel.id
+        bot_config[guild_id]["hour"] = hour
+        bot_config[guild_id]["minute"] = minute
+        bot_config[guild_id]["timezone"] = msg_tz.content
+        
+        save_config()
+        await ctx.send("✅ Text Configuration saved.")
+
     except Exception as e:
         await ctx.send(f"Setup cancelled: {e}")
 
-# --- Main Execution with Safe Shutdown ---
+# --- Main Execution ---
 if __name__ == "__main__":
     try:
         bot.run(TOKEN)
     except Exception as e:
         logger.critical(f"Bot crashed with error: {e}")
     finally:
-        # Force a save when the bot shuts down (Ctrl+C or Error)
         if users_dirty:
             save_users()
-            logger.info("Shutdown: User data saved to disk.")
-        else:
-            logger.info("Shutdown: No user data changes to save.")
+            logger.info("Shutdown: User data saved.")

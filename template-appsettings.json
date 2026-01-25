@@ -3,5 +3,6 @@
     "GifDirectory": "FunkyMonkeyGifs",
     "ConfigFile": "config.json",
     "UsersFile": "users.json",
-    "LogRetentionDays": 7
+    "LogRetentionDays": 7,
+    "SoundDirectory": "./sounds"
 }
