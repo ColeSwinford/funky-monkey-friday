@@ -12,13 +12,10 @@ import shutil
 from logging.handlers import TimedRotatingFileHandler
 
 # --- Initialization & Configuration ---
-
 try:
     with open("appsettings.json", "r") as f:
         settings = json.load(f)
-        TOKEN = settings["Token"]
         GIF_DIR = settings["GifDirectory"]
-        # Directory for voice alert audio files
         SOUND_DIR = settings.get("SoundDirectory", "./sounds") 
         CONFIG_FILE = settings["ConfigFile"]
         USERS_FILE = settings["UsersFile"]
@@ -29,11 +26,6 @@ except FileNotFoundError:
 except KeyError as e:
     print(f"CRITICAL: Missing setting {e} in 'appsettings.json'. Terminating.")
     sys.exit(1)
-
-# --- Dependency Check ---
-if not shutil.which("ffmpeg"):
-    print("CRITICAL: FFmpeg not found. Voice features will fail. Install FFmpeg to path.")
-    # Execution continues; voice commands will raise errors if invoked
 
 # --- Logging Setup ---
 if not os.path.exists("logs"):
@@ -56,6 +48,23 @@ logger.addHandler(handler)
 console_handler = logging.StreamHandler()
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
+
+# --- Token Loading ---
+TOKEN = os.getenv("DISCORD_TOKEN")
+
+# Fallback: Check JSON if Env Var is missing (Optional backward compatibility)
+if not TOKEN and "Token" in settings:
+    TOKEN = settings["Token"]
+    logger.warning("Loading Token from JSON. Move to Environment Variables for security.")
+
+if not TOKEN:
+    logger.critical("No 'DISCORD_TOKEN' found in environment variables. Terminating.")
+    sys.exit(1)
+
+# --- Dependency Check ---
+if not shutil.which("ffmpeg"):
+    logger.critical("FFmpeg not found. Voice features will fail. Install FFmpeg to path.")
+    # Execution continues; voice commands will raise errors if invoked
 
 # --- File Integrity ---
 def ensure_file_exists(filepath, default_content):

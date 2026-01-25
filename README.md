@@ -33,10 +33,7 @@ Add it to your server here! https://discord.com/oauth2/authorize?client_id=92771
 ## Setup & Requirements
 
 1.  **Environment:** Requires Docker
-2.  **Configuration:**
-    * Rename the included `template-appsettings.json` to `appsettings.json`.
-    * Open the file and paste your Bot Token inside.
-3.  **Permissions:** The bot requires the **Message Content Intent** (enabled in the Discord Developer Portal). For the role itself, grant:
+2.  **Permissions:** The bot requires the **Message Content Intent** (enabled in the Discord Developer Portal). For the role itself, grant:
     * `View Channels`
     * `Send Messages` & `Read Message History`
     * `Embed Links` & `Attach Files`
@@ -45,12 +42,13 @@ Add it to your server here! https://discord.com/oauth2/authorize?client_id=92771
 
     Permissions Integer: `3394560`
 
-## Deploy via SCP (One-Liner)
+## Deploy
 
-Replace `target` with your SSH alias or `user@ip`.
+Execute this script on your server. It will download the latest code and start the bot.
 
+*Replace `YOUR_TOKEN` with your actual Discord Bot Token.*
 ```bash
-scp -r . target:~/FunkyMonkeyFriday; ssh target "cd FunkyMonkeyFriday && docker compose up -d --build"
+git clone [https://github.com/ColeSwinford/Python--Funky-Monkey-Friday-Bot.git](https://github.com/ColeSwinford/Python--Funky-Monkey-Friday-Bot.git) FunkyMonkeyFriday 2>/dev/null || (cd FunkyMonkeyFriday && git pull); cd FunkyMonkeyFriday; DISCORD_TOKEN=YOUR_TOKEN docker compose up -d --build
 ```
 
 ## Privacy & Legal

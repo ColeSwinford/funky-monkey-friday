@@ -1,13 +1,14 @@
 services:
-  monkey:
+  funky-monkey-friday:
     build: .
     container_name: funky_monkey_friday
     restart: unless-stopped
+    environment:
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
     volumes:
-      # 1. Map your bot files (persistence)
+      # Map bot files (persistence)
       - .:/app
       
-      # 2. Map the Pi's timezone settings (Sync Time)
-      # This forces the container to use the Pi's exact clock and timezone.
+      # Map to the Pi's timezone settings (Sync Time)
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
