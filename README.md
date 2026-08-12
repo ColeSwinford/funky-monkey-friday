@@ -1,7 +1,6 @@
 # Funky-Monkey-Friday
 
 An open-source, configurable Discord bot that alerts your server when it's Funky Monkey Friday!
-
 <sub>Now with 100% more screaming.</sub>
 
 Add it to your server here! [here](https://discord.com/oauth2/authorize?client_id=927716084944076810&permissions=3394560&integration_type=0&scope=bot)
