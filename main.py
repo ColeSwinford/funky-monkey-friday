@@ -16,7 +16,7 @@ try:
     with open("appsettings.json", "r") as f:
         settings = json.load(f)
         GIF_DIR = settings["GifDirectory"]
-        SOUND_DIR = settings.get("SoundDirectory", "./sounds") 
+        SOUND_DIR = settings.get("SoundDirectory", "./sounds")
         CONFIG_FILE = settings["ConfigFile"]
         USERS_FILE = settings["UsersFile"]
         LOG_RETENTION_DAYS = settings.get("LogRetentionDays", 7)
@@ -52,7 +52,6 @@ logger.addHandler(console_handler)
 # --- Token Loading ---
 TOKEN = os.getenv("DISCORD_TOKEN")
 
-# Fallback: Check JSON if Env Var is missing (Optional backward compatibility)
 if not TOKEN and "Token" in settings:
     TOKEN = settings["Token"]
     logger.warning("Loading Token from JSON. Move to Environment Variables for security.")
@@ -63,8 +62,7 @@ if not TOKEN:
 
 # --- Dependency Check ---
 if not shutil.which("ffmpeg"):
-    logger.critical("FFmpeg not found. Voice features will fail. Install FFmpeg to path.")
-    # Execution continues; voice commands will raise errors if invoked
+    logger.critical("FFmpeg not found. Voice features will fail. Install FFmpeg to PATH.")
 
 # --- File Integrity ---
 def ensure_file_exists(filepath, default_content):
@@ -77,18 +75,17 @@ ensure_file_exists(CONFIG_FILE, {})
 ensure_file_exists(USERS_FILE, {})
 
 # --- Runtime Memory ---
-bot_config = {}       
-user_balances = {}    
-sent_cache = set()    
-users_dirty = False   
+bot_config = {}
+user_balances = {}
+sent_cache = set()
+users_dirty = False
 
 # --- Bot Initialization ---
 intents = discord.Intents.default()
 intents.message_content = True
-# Enable voice intent to detect user presence in channels
-intents.voice_states = True 
+intents.voice_states = True
 bot = commands.Bot(command_prefix='!', intents=intents)
-bot.remove_command('help') 
+bot.remove_command('help')
 
 # --- Persistence Helpers ---
 
@@ -97,14 +94,16 @@ def load_data():
     global bot_config, user_balances
     
     with open(CONFIG_FILE, 'r') as f:
-        try: bot_config = json.load(f)
-        except json.JSONDecodeError: 
+        try:
+            bot_config = json.load(f)
+        except json.JSONDecodeError:
             logger.error("Config file corrupted. Resetting.")
             bot_config = {}
     
     with open(USERS_FILE, 'r') as f:
-        try: user_balances = json.load(f)
-        except json.JSONDecodeError: 
+        try:
+            user_balances = json.load(f)
+        except json.JSONDecodeError:
             logger.error("User file corrupted. Resetting.")
             user_balances = {}
 
@@ -121,9 +120,11 @@ def save_users():
 def get_random_monkey_path():
     """Gets a random GIF from the configured directory."""
     try:
-        if not os.path.exists(GIF_DIR): return None
+        if not os.path.exists(GIF_DIR):
+            return None
         files = [f for f in os.listdir(GIF_DIR) if os.path.isfile(os.path.join(GIF_DIR, f))]
-        if not files: return None
+        if not files:
+            return None
         return os.path.join(GIF_DIR, secrets.choice(files))
     except Exception as e:
         logger.error(f"Error reading GIF directory: {e}")
@@ -132,9 +133,11 @@ def get_random_monkey_path():
 def get_random_sound_path():
     """Gets a random MP3/WAV from the configured directory."""
     try:
-        if not os.path.exists(SOUND_DIR): return None
-        files = [f for f in os.listdir(SOUND_DIR) if f.endswith(('.mp3', '.wav'))]
-        if not files: return None
+        if not os.path.exists(SOUND_DIR):
+            return None
+        files = [f for f in os.listdir(SOUND_DIR) if f.lower().endswith(('.mp3', '.wav', '.ogg'))]
+        if not files:
+            return None
         return os.path.join(SOUND_DIR, secrets.choice(files))
     except Exception as e:
         logger.error(f"Error reading Sound directory: {e}")
@@ -151,8 +154,6 @@ async def on_ready():
         check_monkey_time.start()
     if not autosave_users.is_running():
         autosave_users.start()
-    
-    # Start voice activity task
     if not random_monkey_noises.is_running():
         random_monkey_noises.start()
         
@@ -165,25 +166,25 @@ async def check_monkey_time():
     """Friday Text Alert Logic"""
     utc_now = datetime.datetime.now(datetime.timezone.utc)
     
-    for guild_id_str, settings in bot_config.items():
+    for guild_id_str, cfg in bot_config.items():
         try:
-            # Check if text config exists
-            if 'timezone' not in settings or 'hour' not in settings:
+            if 'timezone' not in cfg or 'hour' not in cfg or 'minute' not in cfg or 'channel_id' not in cfg:
                 continue
 
-            target_tz = pytz.timezone(settings['timezone'])
+            target_tz = pytz.timezone(cfg['timezone'])
             local_time = utc_now.astimezone(target_tz)
 
             if (local_time.weekday() == 4 and 
-                local_time.hour == settings['hour'] and 
-                local_time.minute == settings['minute']):
+                local_time.hour == cfg['hour'] and 
+                local_time.minute == cfg['minute']):
                 
                 today_str = local_time.strftime('%Y-%m-%d')
                 cache_key = (guild_id_str, today_str)
 
-                if cache_key in sent_cache: continue
+                if cache_key in sent_cache:
+                    continue
 
-                channel = bot.get_channel(settings['channel_id'])
+                channel = bot.get_channel(cfg['channel_id'])
                 file_path = get_random_monkey_path()
 
                 if channel and file_path:
@@ -195,62 +196,79 @@ async def check_monkey_time():
                         logger.info(f"Alert sent to guild {guild_id_str}")
                         sent_cache.add(cache_key)
                     except Exception as e:
-                        logger.error(f"Failed to send to guild {guild_id_str}: {e}")
+                        logger.error(f"Failed to send alert to guild {guild_id_str}: {e}")
 
         except Exception as e:
-            logger.error(f"Error processing guild {guild_id_str}: {e}")
+            logger.error(f"Error processing text alert for guild {guild_id_str}: {e}")
 
-@tasks.loop(hours=1)
+@tasks.loop(minutes=15)
 async def random_monkey_noises():
-    """Voice Channel Ambush Logic (5% chance per hour)"""
-    for guild_id_str, settings in bot_config.items():
+    """Voice Channel Ambush Logic - checks every 15 minutes"""
+    for guild_id_str, cfg in bot_config.items():
         try:
-            # 1. Check if voice is configured
-            vc_id = settings.get("voice_channel_id")
-            mode = settings.get("voice_mode", "off") # off, always, friday
+            vc_id = cfg.get("voice_channel_id")
+            mode = cfg.get("voice_mode", "off")
             
             if not vc_id or mode == "off":
                 continue
 
-            # 2. Check "Friday Only" constraint
+            # Friday check
             if mode == "friday":
-                # Uses the text timezone if set, else UTC
-                tz_str = settings.get("timezone", "UTC")
+                tz_str = cfg.get("timezone", "UTC")
                 local_now = datetime.datetime.now(pytz.timezone(tz_str))
-                if local_now.weekday() != 4: # 4 is Friday
+                if local_now.weekday() != 4:
                     continue
 
-            # 3. Random Chance Execution (5%)
-            # secrets.randbelow(100) returns 0-99
-            if secrets.randbelow(100) < 5:
-                voice_channel = bot.get_channel(vc_id)
-                sound_file = get_random_sound_path()
-                
-                if voice_channel and sound_file:
-                    logger.info(f"🎲 Ambush triggered for {guild_id_str}")
-                    
-                    # Connect
-                    try:
-                        vc = await voice_channel.connect()
-                    except discord.ClientException:
-                        logger.warning(f"Already in voice for {guild_id_str}, skipping.")
-                        continue
-                    except Exception as e:
-                        logger.error(f"Voice connection failed: {e}")
-                        continue
+            # Target channel validation
+            voice_channel = bot.get_channel(vc_id)
+            if not voice_channel:
+                continue
 
-                    # Play Audio
-                    try:
-                        vc.play(discord.FFmpegPCMAudio(sound_file))
-                        while vc.is_playing():
-                            await asyncio.sleep(1)
-                    except Exception as e:
-                        logger.error(f"Audio playback failed: {e}")
-                    finally:
-                        await vc.disconnect()
-        
+            # Skip if the channel has no active human members
+            active_listeners = [m for m in voice_channel.members if not m.bot]
+            if not active_listeners:
+                continue
+
+            # Default: 25% chance every 15 minutes (~1 trigger/hour with active users)
+            chance = cfg.get("voice_chance", 25)
+            if secrets.randbelow(100) >= chance:
+                continue
+
+            sound_file = get_random_sound_path()
+            if not sound_file:
+                logger.warning(f"No sound files found for ambush in guild {guild_id_str}")
+                continue
+
+            logger.info(f"Ambush triggered for guild {guild_id_str} in channel '{voice_channel.name}'")
+
+            try:
+                vc = await voice_channel.connect()
+            except discord.ClientException:
+                logger.warning(f"Already connected to voice in guild {guild_id_str}, skipping.")
+                continue
+            except Exception as e:
+                logger.error(f"Voice connection failed for guild {guild_id_str}: {e}")
+                continue
+
+            playback_done = asyncio.Event()
+
+            def after_playing(error):
+                if error:
+                    logger.error(f"Playback error in guild {guild_id_str}: {error}")
+                bot.loop.call_soon_threadsafe(playback_done.set)
+
+            try:
+                audio_source = discord.FFmpegPCMAudio(sound_file)
+                vc.play(audio_source, after=after_playing)
+                await playback_done.wait()
+            except Exception as e:
+                logger.error(f"Failed to play audio in guild {guild_id_str}: {e}")
+            finally:
+                if vc.is_connected():
+                    await vc.disconnect()
+
         except Exception as e:
-            logger.error(f"Error in monkey noises task for {guild_id_str}: {e}")
+            logger.error(f"Error in monkey noises task for guild {guild_id_str}: {e}")
 
 @tasks.loop(minutes=5)
 async def autosave_users():
@@ -272,7 +290,7 @@ async def help(ctx):
     embed = discord.Embed(
         title="🍌 Funky Monkey Assistance",
         description="You're in the ape zone.",
-        color=0xFFD700 
+        color=0xFFD700
     )
     
     embed.add_field(
@@ -369,7 +387,7 @@ async def test(ctx):
 @commands.has_permissions(administrator=True)
 async def testvoice(ctx):
     """Manually triggers the voice sound in the user's channel."""
-    if not ctx.author.voice:
+    if not ctx.author.voice or not ctx.author.voice.channel:
         await ctx.send("You must be in a voice channel to test this.")
         return
 
@@ -378,23 +396,40 @@ async def testvoice(ctx):
         await ctx.send("Error: No sound files found in directory.")
         return
 
-    vc = await ctx.author.voice.channel.connect()
     try:
-        vc.play(discord.FFmpegPCMAudio(sound_file))
-        while vc.is_playing():
-            await asyncio.sleep(1)
+        vc = await ctx.author.voice.channel.connect()
+    except discord.ClientException:
+        await ctx.send("Already connected to a voice channel.")
+        return
+    except Exception as e:
+        await ctx.send(f"Voice connection failed: {e}")
+        return
+
+    playback_done = asyncio.Event()
+
+    def after_playing(error):
+        if error:
+            logger.error(f"Manual playback error: {error}")
+        bot.loop.call_soon_threadsafe(playback_done.set)
+
+    try:
+        vc.play(discord.FFmpegPCMAudio(sound_file), after=after_playing)
+        await playback_done.wait()
+    except Exception as e:
+        await ctx.send(f"Playback failed: {e}")
     finally:
-        await vc.disconnect()
+        if vc.is_connected():
+            await vc.disconnect()
 
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def voicecfg(ctx):
     """Sets up the voice ambush feature."""
-    def check(m): return m.author == ctx.author and m.channel == ctx.channel
+    def check(m): 
+        return m.author == ctx.author and m.channel == ctx.channel
 
     guild_id = str(ctx.guild.id)
     
-    # Initialize config if not exists
     if guild_id not in bot_config:
         bot_config[guild_id] = {}
 
@@ -402,11 +437,11 @@ async def voicecfg(ctx):
         # 1. Get Channel ID
         await ctx.send("🔊 **Voice Setup**\nPaste the **Voice Channel ID** to haunt (or type 'cancel'):")
         msg_id = await bot.wait_for('message', check=check, timeout=60)
-        if msg_id.content.lower() == 'cancel': return
+        if msg_id.content.lower() == 'cancel': 
+            return
         
         try:
             vc_id = int(msg_id.content)
-            # Verify channel exists
             if not bot.get_channel(vc_id):
                 await ctx.send("❌ Channel not found.")
                 return
@@ -422,12 +457,25 @@ async def voicecfg(ctx):
             await ctx.send("❌ Invalid mode.")
             return
 
-        # 3. Save
+        # 3. Get Trigger Chance
+        await ctx.send("🎲 **Set Chance**:\nEnter trigger percentage every 15 minutes (1-100, default is 25):")
+        msg_chance = await bot.wait_for('message', check=check, timeout=60)
+        try:
+            chance = int(msg_chance.content)
+            if not 1 <= chance <= 100:
+                chance = 25
+        except ValueError:
+            chance = 25
+
+        # 4. Save
         bot_config[guild_id]["voice_channel_id"] = vc_id
         bot_config[guild_id]["voice_mode"] = mode
+        bot_config[guild_id]["voice_chance"] = chance
         save_config()
         
-        await ctx.send(f"✅ **Saved!**\nTarget: <#{vc_id}>\nMode: `{mode}`\nChance: 5% per hour.")
+        await ctx.send(
+            f"✅ **Saved!**\nTarget: <#{vc_id}>\nMode: `{mode}`\nChance: {chance}% every 15 minutes (only triggers when users are present)."
+        )
 
     except asyncio.TimeoutError:
         await ctx.send("❌ Timed out.")
@@ -436,7 +484,8 @@ async def voicecfg(ctx):
 @commands.has_permissions(administrator=True)
 async def config(ctx):
     """Configures the scheduled text alerts."""
-    def check(m): return m.author == ctx.author and m.channel == ctx.channel
+    def check(m): 
+        return m.author == ctx.author and m.channel == ctx.channel
 
     guild_id = str(ctx.guild.id)
     if guild_id not in bot_config:
@@ -453,9 +502,8 @@ async def config(ctx):
 
         await ctx.send('Enter timezone (e.g. US/Eastern):')
         msg_tz = await bot.wait_for('message', check=check, timeout=60)
-        pytz.timezone(msg_tz.content) # Validate
+        pytz.timezone(msg_tz.content)
 
-        # Update specific keys instead of overwriting the whole dict
         bot_config[guild_id]["channel_id"] = ctx.channel.id
         bot_config[guild_id]["hour"] = hour
         bot_config[guild_id]["minute"] = minute
