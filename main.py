@@ -201,9 +201,9 @@ async def check_monkey_time():
         except Exception as e:
             logger.error(f"Error processing text alert for guild {guild_id_str}: {e}")
 
-@tasks.loop(minutes=15)
+@tasks.loop(hours=1)
 async def random_monkey_noises():
-    """Voice Channel Ambush Logic - checks every 15 minutes"""
+    """Voice Channel Ambush Logic - checks once per hour"""
     for guild_id_str, cfg in bot_config.items():
         try:
             vc_id = cfg.get("voice_channel_id")
@@ -229,8 +229,8 @@ async def random_monkey_noises():
             if not active_listeners:
                 continue
 
-            # Default: 25% chance every 15 minutes (~1 trigger/hour with active users)
-            chance = cfg.get("voice_chance", 25)
+            # Default: 10% chance per hour
+            chance = cfg.get("voice_chance", 10)
             if secrets.randbelow(100) >= chance:
                 continue
 
@@ -458,14 +458,14 @@ async def voicecfg(ctx):
             return
 
         # 3. Get Trigger Chance
-        await ctx.send("🎲 **Set Chance**:\nEnter trigger percentage every 15 minutes (1-100, default is 25):")
+        await ctx.send("🎲 **Set Chance**:\nEnter trigger percentage per hour (1-100, default is 10):")
         msg_chance = await bot.wait_for('message', check=check, timeout=60)
         try:
             chance = int(msg_chance.content)
             if not 1 <= chance <= 100:
-                chance = 25
+                chance = 10
         except ValueError:
-            chance = 25
+            chance = 10
 
         # 4. Save
         bot_config[guild_id]["voice_channel_id"] = vc_id
@@ -474,7 +474,7 @@ async def voicecfg(ctx):
         save_config()
         
         await ctx.send(
-            f"✅ **Saved!**\nTarget: <#{vc_id}>\nMode: `{mode}`\nChance: {chance}% every 15 minutes (only triggers when users are present)."
+            f"✅ **Saved!**\nTarget: <#{vc_id}>\nMode: `{mode}`\nChance: {chance}% per hour (only triggers when users are present)."
         )
 
     except asyncio.TimeoutError:
